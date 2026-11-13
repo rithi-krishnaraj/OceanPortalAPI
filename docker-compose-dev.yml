@@ -1,0 +1,5 @@
+# Local: http://localhost:8002/api/datasets
+services:
+  ocean-portal-api:
+    ports:
+      - "8002:8002"

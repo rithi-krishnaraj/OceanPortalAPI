@@ -1,0 +1,13 @@
+# Base service. Combine with docker-compose-dev.yml (local); see the Makefile.
+services:
+  ocean-portal-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ocean-portal-api
+    volumes:
+      # datasets from download.sh; read-only, the API only lists them
+      - ./data:/app/data:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
