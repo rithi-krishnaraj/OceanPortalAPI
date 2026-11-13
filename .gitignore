@@ -1,4 +1,25 @@
-__pycache__/
-.venv/
+# Downloaded GNPS2 tables (~160 MB; rebuild with ./download.sh)
 data/*
 !data/.gitkeep
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets / config
+.env
+.env.*
+*.pem
+*.key
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
