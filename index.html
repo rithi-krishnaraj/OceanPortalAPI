@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ocean Portal</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 1200px; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.25rem; margin: 1rem 0 0.25rem; }
+    p { color: #555; margin-top: 0; }
+    a { color: #0b5cad; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; white-space: nowrap; }
+    th { background: #f4f6f8; font-weight: 600; position: sticky; top: 0; }
+    td.mono, .mono { font-family: ui-monospace, monospace; font-size: 0.9em; }
+    .error { color: #b00020; }
+    .tabs { display: flex; gap: 0.25rem; margin: 1rem 0 0.5rem; border-bottom: 1px solid #ccc; }
+    .tabs button { border: 1px solid #ccc; border-bottom: none; background: #f4f6f8; padding: 0.4rem 0.9rem;
+                   cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
+    .tabs button.active { background: #fff; font-weight: 600; position: relative; top: 1px; }
+    .tabs button:disabled { color: #aaa; cursor: default; }
+    .pager { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: center; margin: 0.5rem 0; color: #444; }
+    .pager button { font: inherit; padding: 0.2rem 0.6rem; cursor: pointer; }
+    .scroll { overflow: auto; max-height: 70vh; border: 1px solid #ddd; }
+    .scroll table td, .scroll table th { font-size: 0.85em; }
+    td.tables { display: flex; gap: 0.4rem; }
+    .chip { font-size: 0.85em; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid #9cc3e6;
+            background: #eef5fc; text-decoration: none; }
+    .chip.missing { border-color: #ddd; background: #f6f6f6; color: #999; }
+  </style>
+</head>
+<body>
+  <h1><a href="#" style="color:inherit;text-decoration:none">Ocean Portal</a></h1>
+  <p>Data from the <a href="/docs">Ocean Portal API</a></p>
+  <main id="main"></main>
+
+  <script>
+    const main = document.getElementById("main");
+    const ROWS = 50, COLS = 30;
+    const TABLE_NAMES = { features: "Features", metadata: "Metadata", annotations: "Annotations" };
+
+    function el(tag, attrs = {}, ...children) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v);
+      }
+      for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(c ?? ""));
+      return e;
+    }
+
+    async function api(path) {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+      return r.json();
+    }
+
+    function showError(where, err) {
+      where.replaceChildren(el("p", { class: "error" }, "Could not load: " + err.message));
+    }
+
+    function taskLink(taskId) {
+      return el("a", { href: "https://gnps2.org/status?task=" + encodeURIComponent(taskId), target: "_blank", class: "mono" }, taskId);
+    }
+
+    // ---- List of datasets -------------------------------------------------
+    async function showList() {
+      main.replaceChildren(el("p", {}, "Loading…"));
+      try {
+        const data = await api("/api/datasets");
+        if (!data.datasets.length) { main.replaceChildren(el("p", {}, "No datasets yet.")); return; }
+        const body = el("tbody");
+        for (const d of data.datasets) {
+          const have = d.tables || [];
+          const tables = el("td", { class: "tables" });
+          for (const t of Object.keys(TABLE_NAMES)) {
+            tables.append(have.includes(t)
+              ? el("a", { href: "#" + encodeURIComponent(d.dataset_name) + "/" + t, class: "chip" }, "✓ " + TABLE_NAMES[t])
+              : el("span", { class: "chip missing", title: "Not in this GNPS2 task's download" }, "✗ " + TABLE_NAMES[t]));
+          }
+          body.append(el("tr", {},
+            el("td", {}, el("a", { href: "#" + encodeURIComponent(d.dataset_name) }, d.dataset_name)),
+            el("td", {}, d.workflow),
+            el("td", {}, taskLink(d.task_id)),
+            tables));
+        }
+        main.replaceChildren(el("table", {},
+          el("thead", {}, el("tr", {}, el("th", {}, "Dataset"), el("th", {}, "Workflow"), el("th", {}, "GNPS2 task"), el("th", {}, "Tables"))),
+          body));
+      } catch (err) { showError(main, err); }
+    }
+
+    // ---- One dataset: tabs for its three tables ---------------------------
+    async function showDataset(name, table) {
+      main.replaceChildren(el("p", {}, "Loading…"));
+      let ds;
+      try { ds = await api("/api/datasets/" + encodeURIComponent(name)); }
+      catch (err) { showError(main, err); return; }
+
+      if (!ds.tables[table]) table = Object.keys(TABLE_NAMES).find(t => ds.tables[t]) || "features";
+      const tabs = el("div", { class: "tabs" });
+      for (const t of Object.keys(TABLE_NAMES)) {
+        const size = ds.tables[t];
+        tabs.append(el("button", {
+          class: t === table ? "active" : "",
+          onclick: () => { location.hash = encodeURIComponent(name) + "/" + t; },
+          ...(size ? {} : { disabled: "" }),
+        }, TABLE_NAMES[t] + (size ? ` (${size.rows.toLocaleString()} × ${size.columns.toLocaleString()})` : " (none)")));
+      }
+      const view = el("div");
+      main.replaceChildren(
+        el("p", {}, el("a", { href: "#" }, "← All datasets")),
+        el("h2", {}, ds.dataset_name),
+        el("p", {}, `${ds.workflow} · GNPS2 task `, taskLink(ds.task_id)),
+        tabs, view);
+      if (ds.tables[table]) loadTable(view, name, table, 0, 0);
+    }
+
+    async function loadTable(view, name, table, offset, colOffset) {
+      view.replaceChildren(el("p", {}, "Loading… (a large table takes a few seconds the first time)"));
+      let t;
+      try {
+        t = await api(`/api/datasets/${encodeURIComponent(name)}/tables/${table}` +
+                      `?offset=${offset}&limit=${ROWS}&col_offset=${colOffset}&col_limit=${COLS}`);
+      } catch (err) { showError(view, err); return; }
+
+      const go = (o, c) => () => loadTable(view, name, table, o, c);
+      const lastRow = Math.min(offset + ROWS, t.total_rows);
+      const lastCol = Math.min(colOffset + COLS, t.total_columns);
+      const pager = el("div", { class: "pager" },
+        el("span", {},
+          el("button", { onclick: go(Math.max(0, offset - ROWS), colOffset), ...(offset ? {} : { disabled: "" }) }, "‹ Prev rows"), " ",
+          `Rows ${(offset + 1).toLocaleString()}–${lastRow.toLocaleString()} of ${t.total_rows.toLocaleString()}`, " ",
+          el("button", { onclick: go(offset + ROWS, colOffset), ...(lastRow < t.total_rows ? {} : { disabled: "" }) }, "Next rows ›")));
+      if (t.total_columns > COLS) {
+        pager.append(el("span", {},
+          el("button", { onclick: go(offset, Math.max(0, colOffset - COLS)), ...(colOffset ? {} : { disabled: "" }) }, "‹ Prev columns"), " ",
+          `Columns ${(colOffset + 1).toLocaleString()}–${lastCol.toLocaleString()} of ${t.total_columns.toLocaleString()}`, " ",
+          el("button", { onclick: go(offset, colOffset + COLS), ...(lastCol < t.total_columns ? {} : { disabled: "" }) }, "Next columns ›")));
+      }
+
+      const body = el("tbody");
+      for (const row of t.rows) body.append(el("tr", {}, ...row.map(v => el("td", {}, v === null ? "" : String(v)))));
+      view.replaceChildren(pager,
+        el("div", { class: "scroll" }, el("table", {},
+          el("thead", {}, el("tr", {}, ...t.columns.map(c => el("th", {}, c)))), body)));
+    }
+
+    // ---- Routing: #<dataset>/<table> ---------------------------------------
+    function route() {
+      const [name, table] = location.hash.slice(1).split("/").map(decodeURIComponent);
+      if (name) showDataset(name, table || "features"); else showList();
+    }
+    window.addEventListener("hashchange", route);
+    route();
+  </script>
+</body>
+</html>
